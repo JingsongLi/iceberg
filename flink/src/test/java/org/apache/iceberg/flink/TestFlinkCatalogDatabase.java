@@ -24,6 +24,7 @@ import java.util.Map;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.types.Types;
@@ -141,9 +142,17 @@ public class TestFlinkCatalogDatabase extends FlinkCatalogTestBase {
 
     String[] databases = tEnv.listDatabases();
 
-    if (isHadoopCatalog || baseNamespace.length > 0) {
+    if (isHadoopCatalog) {
       Assert.assertEquals("Should have 1 database", 1, databases.length);
       Assert.assertEquals("Should have only db database", "db", databases[0]);
+
+      if (baseNamespace.length > 0) {
+        // test namespace not belongs to this catalog
+        validationNamespaceCatalog.createNamespace(Namespace.of(baseNamespace[0], "UNKNOWN_NAMESPACE"));
+        databases = tEnv.listDatabases();
+        Assert.assertEquals("Should have 1 database", 1, databases.length);
+        Assert.assertEquals("Should have only db database", "db", databases[0]);
+      }
     } else {
       Assert.assertEquals("Should have 2 databases", 2, databases.length);
       Assert.assertEquals(

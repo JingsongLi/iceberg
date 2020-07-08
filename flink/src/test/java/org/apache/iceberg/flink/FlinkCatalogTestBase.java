@@ -108,7 +108,7 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
     tEnv.registerCatalog(catalogName, flinkCatalog);
 
     this.flinkIdentifier = catalogName + "." + DATABASE;
-    this.icebergNamespace = Namespace.of(ArrayUtils.concat(baseNamespace, new String[] {DATABASE }));
+    this.icebergNamespace = Namespace.of(ArrayUtils.concat(baseNamespace, new String[] { DATABASE }));
   }
 
   @After
