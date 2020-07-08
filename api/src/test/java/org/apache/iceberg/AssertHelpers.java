@@ -69,6 +69,32 @@ public class AssertHelpers {
   }
 
   /**
+   * A convenience method to assert the cause of thrown exception.
+   * @param message A String message to describe this assertion
+   * @param expected An Exception class that the cause of the Runnable should throw
+   * @param containedInMessage A String that should be contained by the cause of the thrown
+   *                           exception's message
+   * @param runnable A Runnable that is expected to throw the runtime exception
+   */
+  public static void assertThrowsCause(String message,
+      Class<? extends Exception> expected,
+      String containedInMessage,
+      Runnable runnable) {
+    try {
+      runnable.run();
+      Assert.fail("No exception was thrown (" + message + "), expected: " +
+          expected.getName());
+    } catch (Exception actual) {
+      Throwable cause = actual.getCause();
+      if (cause instanceof Exception) {
+        handleException(message, expected, containedInMessage, (Exception) actual.getCause());
+      } else {
+        Assert.fail("Occur non-exception cause: " + cause);
+      }
+    }
+  }
+
+  /**
    * A convenience method to avoid a large number of @Test(expected=...) tests
    * @param message A String message to describe this assertion
    * @param expected An Exception class that the Runnable should throw
