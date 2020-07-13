@@ -19,13 +19,10 @@
 
 package org.apache.iceberg.flink;
 
-import java.util.concurrent.ConcurrentMap;
-import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.iceberg.hive.HiveCatalog;
 import org.apache.iceberg.hive.TestHiveMetastore;
-import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
@@ -34,23 +31,19 @@ public abstract class FlinkTestBase extends AbstractTestBase {
   private static TestHiveMetastore metastore = null;
   protected static HiveConf hiveConf = null;
   protected static HiveCatalog catalog = null;
-  protected static ConcurrentMap<String, Catalog> flinkCatalogs;
 
   @BeforeClass
-  public static void startMetastoreAndSpark() {
+  public static void startMetastoreAndFlink() {
     FlinkTestBase.metastore = new TestHiveMetastore();
     metastore.start();
     FlinkTestBase.hiveConf = metastore.hiveConf();
     FlinkTestBase.catalog = new HiveCatalog(metastore.hiveConf());
-    flinkCatalogs = Maps.newConcurrentMap();
   }
 
   @AfterClass
-  public static void stopMetastoreAndSpark() {
+  public static void stopMetastoreAndFlink() {
     metastore.stop();
     catalog.close();
     FlinkTestBase.catalog = null;
-    flinkCatalogs.values().forEach(Catalog::close);
-    flinkCatalogs.clear();
   }
 }

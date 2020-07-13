@@ -31,6 +31,7 @@ import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -72,6 +73,7 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
   protected final String[] baseNamespace;
   protected final Catalog validationCatalog;
   protected final SupportsNamespaces validationNamespaceCatalog;
+  protected final org.apache.flink.table.catalog.Catalog flinkCatalog;
 
   protected final String flinkDatabase;
   protected final Namespace icebergNamespace;
@@ -102,12 +104,16 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
         return super.buildIcebergCatalog(name, options, hiveConf);
       }
     };
-    tEnv.registerCatalog(
-        catalogName,
-        flinkCatalogs.computeIfAbsent(catalogName, k -> factory.createCatalog(k, config)));
+    flinkCatalog = factory.createCatalog(catalogName, config);
+    tEnv.registerCatalog(catalogName, flinkCatalog);
 
     this.flinkDatabase = catalogName + "." + DATABASE;
     this.icebergNamespace = Namespace.of(ArrayUtils.concat(baseNamespace, new String[] { DATABASE }));
+  }
+
+  @After
+  public void after() {
+    flinkCatalog.close();
   }
 
   public void sql(String query, Object... args) {
