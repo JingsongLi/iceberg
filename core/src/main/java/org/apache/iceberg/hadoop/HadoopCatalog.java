@@ -42,6 +42,7 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.exceptions.NamespaceNotEmptyException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.exceptions.RuntimeIOException;
@@ -276,6 +277,9 @@ public class HadoopCatalog extends BaseMetastoreCatalog implements Closeable, Su
     }
 
     try {
+      if (fs.listStatus(nsPath).length != 0) {
+        throw new NamespaceNotEmptyException("Namespace " + namespace + " is not empty.");
+      }
       return fs.delete(nsPath, false /* recursive */);
 
     } catch (IOException e) {

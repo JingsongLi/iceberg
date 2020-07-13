@@ -19,8 +19,6 @@
 
 package org.apache.iceberg.flink;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.flink.configuration.GlobalConfiguration;
@@ -32,6 +30,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.hive.HiveCatalog;
 import org.apache.iceberg.relocated.com.google.common.base.Splitter;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 
 /**
  * A Flink Catalog factory implementation that creates {@link FlinkCatalog}.
@@ -44,7 +44,7 @@ import org.apache.iceberg.relocated.com.google.common.base.Splitter;
  *   <li><tt>clients</tt> - the Hive Client Pool Size (Hive catalog only)</li>
  *   <li><tt>warehouse</tt> - the warehouse path (Hadoop catalog only)</li>
  *   <li><tt>default-database</tt> - a database name to use as the default</li>
- *   <li><tt>base-namespace</tt> - a base namespace as the prefix for all databases</li>
+ *   <li><tt>base-namespace</tt> - a base namespace as the prefix for all databases (Hadoop catalog only)</li>
  * </ul>
  * <p>
  * To use a custom catalog that is not a Hive or Hadoop catalog, extend this class and override
@@ -101,7 +101,7 @@ public class FlinkCatalogFactory implements CatalogFactory {
 
   @Override
   public Map<String, String> requiredContext() {
-    Map<String, String> context = new HashMap<>();
+    Map<String, String> context = Maps.newHashMap();
     context.put(CatalogDescriptorValidator.CATALOG_TYPE, "iceberg");
     context.put(CatalogDescriptorValidator.CATALOG_PROPERTY_VERSION, "1");
     return context;
@@ -109,7 +109,7 @@ public class FlinkCatalogFactory implements CatalogFactory {
 
   @Override
   public List<String> supportedProperties() {
-    List<String> properties = new ArrayList<>();
+    List<String> properties = Lists.newArrayList();
     properties.add(ICEBERG_CATALOG_TYPE);
     properties.add(HIVE_URI);
     properties.add(HIVE_CLIENT_POOL_SIZE);

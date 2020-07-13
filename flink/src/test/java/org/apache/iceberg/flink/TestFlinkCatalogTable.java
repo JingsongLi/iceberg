@@ -43,16 +43,16 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
 
   @Before
   public void before() {
-    sql("CREATE DATABASE %s", flinkIdentifier);
+    sql("CREATE DATABASE %s", flinkDatabase);
     sql("USE CATALOG %s", catalogName);
     sql("USE %s", DATABASE);
   }
 
   @After
   public void cleanNamespaces() {
-    sql("DROP TABLE IF EXISTS %s.tl", flinkIdentifier);
-    sql("DROP TABLE IF EXISTS %s.tl2", flinkIdentifier);
-    sql("DROP DATABASE IF EXISTS %s", flinkIdentifier);
+    sql("DROP TABLE IF EXISTS %s.tl", flinkDatabase);
+    sql("DROP TABLE IF EXISTS %s.tl2", flinkDatabase);
+    sql("DROP DATABASE IF EXISTS %s", flinkDatabase);
   }
 
   @Test

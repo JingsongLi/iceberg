@@ -21,9 +21,7 @@ package org.apache.iceberg.flink;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -127,31 +125,9 @@ public class FlinkCatalog extends AbstractCatalog {
       return Collections.singletonList(getDefaultDatabase());
     }
 
-    return listAllNamespaces(Namespace.empty()).stream()
+    return asNamespaceCatalog.listNamespaces(Namespace.of(baseNamespace)).stream()
         .map(n -> n.level(n.levels().length - 1))
         .collect(Collectors.toList());
-  }
-
-  private List<Namespace> listAllNamespaces(Namespace namespace) {
-    if (asNamespaceCatalog == null) {
-      throw new RuntimeException("The asNamespaceCatalog should not be null.");
-    }
-
-    String[] levels = namespace.levels();
-    if (levels.length == baseNamespace.length + 1) {
-      return Collections.singletonList(namespace);
-    }
-    if (levels.length < baseNamespace.length + 1) {
-      for (int i = 0; i < levels.length; i++) {
-        if (!baseNamespace[i].equals(levels[i])) {
-          return Collections.emptyList();
-        }
-      }
-      List<Namespace> ret = new ArrayList<>();
-      asNamespaceCatalog.listNamespaces(namespace).forEach(n -> ret.addAll(listAllNamespaces(n)));
-      return ret;
-    }
-    return Collections.emptyList();
   }
 
   @Override
@@ -160,12 +136,12 @@ public class FlinkCatalog extends AbstractCatalog {
       if (!getDefaultDatabase().equals(databaseName)) {
         throw new DatabaseNotExistException(getName(), databaseName);
       } else {
-        return new CatalogDatabaseImpl(new HashMap<>(), "");
+        return new CatalogDatabaseImpl(Maps.newHashMap(), "");
       }
     } else {
       try {
         Map<String, String> metadata =
-            new HashMap<>(asNamespaceCatalog.loadNamespaceMetadata(toNamespace(databaseName)));
+            Maps.newHashMap(asNamespaceCatalog.loadNamespaceMetadata(toNamespace(databaseName)));
         String comment = metadata.remove("comment");
         return new CatalogDatabaseImpl(metadata, comment);
       } catch (NoSuchNamespaceException e) {
@@ -203,10 +179,11 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   private Map<String, String> mergeComment(Map<String, String> metadata, String comment) {
-    Map<String, String> ret = new HashMap<>(metadata);
+    Map<String, String> ret = Maps.newHashMap(metadata);
     if (metadata.containsKey("comment")) {
       throw new CatalogException("Database properties should not contain key: 'comment'.");
     }
+
     if (!StringUtils.isNullOrWhitespaceOnly(comment)) {
       ret.put("comment", comment);
     }
@@ -274,6 +251,10 @@ public class FlinkCatalog extends AbstractCatalog {
         }
       }
     } else {
+      if (getDefaultDatabase().equals(name)) {
+        throw new CatalogException(
+            "Can not alter the default database when the iceberg catalog doesn't support namespaces.");
+      }
       if (!ignoreIfNotExists) {
         throw new DatabaseNotExistException(getName(), name);
       }
@@ -300,7 +281,7 @@ public class FlinkCatalog extends AbstractCatalog {
       // NOTE: We can not create a IcebergCatalogTable, because Flink optimizer may use CatalogTableImpl to copy a new
       // catalog table.
       // Let's re-loading table from Iceberg catalog when creating source/sink operators.
-      return new CatalogTableImpl(tableSchema, table.properties(), "");
+      return new CatalogTableImpl(tableSchema, table.properties(), null);
     } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
       throw new TableNotExistException(getName(), tablePath, e);
     }
@@ -336,7 +317,7 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   /**
-   * TODO Implement DDL-string parser for PartitionSpec.
+   * TODO Add partitioning to the Flink DDL parser.
    */
   @Override
   public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
@@ -358,9 +339,8 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public CatalogPartition getPartition(
-      ObjectPath tablePath, CatalogPartitionSpec partitionSpec
-  ) throws CatalogException {
+  public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -370,9 +350,8 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public void createPartition(
-      ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition partition, boolean ignoreIfExists
-  ) throws CatalogException {
+  public void createPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition partition,
+      boolean ignoreIfExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -383,9 +362,8 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public void alterPartition(
-      ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition newPartition, boolean ignoreIfNotExists
-  ) throws CatalogException {
+  public void alterPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec, CatalogPartition newPartition,
+      boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -423,36 +401,26 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public void alterTableStatistics(
-      ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists
-  ) throws CatalogException {
+  public void alterTableStatistics(ObjectPath tablePath, CatalogTableStatistics tableStatistics,
+      boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public void alterTableColumnStatistics(
-      ObjectPath tablePath, CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists
-  ) throws CatalogException {
+  public void alterTableColumnStatistics(ObjectPath tablePath, CatalogColumnStatistics columnStatistics,
+      boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public void alterPartitionStatistics(
-      ObjectPath tablePath,
-      CatalogPartitionSpec partitionSpec,
-      CatalogTableStatistics partitionStatistics,
-      boolean ignoreIfNotExists
-  ) throws CatalogException {
+  public void alterPartitionStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec,
+      CatalogTableStatistics partitionStatistics, boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public void alterPartitionColumnStatistics(
-      ObjectPath tablePath,
-      CatalogPartitionSpec partitionSpec,
-      CatalogColumnStatistics columnStatistics,
-      boolean ignoreIfNotExists
-  ) throws CatalogException {
+  public void alterPartitionColumnStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec,
+      CatalogColumnStatistics columnStatistics, boolean ignoreIfNotExists) throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -463,16 +431,14 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public List<CatalogPartitionSpec> listPartitions(
-      ObjectPath tablePath, CatalogPartitionSpec partitionSpec
-  ) throws CatalogException {
+  public List<CatalogPartitionSpec> listPartitions(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public List<CatalogPartitionSpec> listPartitionsByFilter(
-      ObjectPath tablePath, List<Expression> filters
-  ) throws CatalogException {
+  public List<CatalogPartitionSpec> listPartitionsByFilter(ObjectPath tablePath, List<Expression> filters)
+      throws CatalogException {
     throw new UnsupportedOperationException();
   }
 
@@ -493,16 +459,14 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public CatalogTableStatistics getPartitionStatistics(
-      ObjectPath tablePath, CatalogPartitionSpec partitionSpec
-  ) throws CatalogException {
+  public CatalogTableStatistics getPartitionStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
+      throws CatalogException {
     return CatalogTableStatistics.UNKNOWN;
   }
 
   @Override
-  public CatalogColumnStatistics getPartitionColumnStatistics(
-      ObjectPath tablePath, CatalogPartitionSpec partitionSpec
-  ) throws CatalogException {
+  public CatalogColumnStatistics getPartitionColumnStatistics(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
+      throws CatalogException {
     return CatalogColumnStatistics.UNKNOWN;
   }
 }

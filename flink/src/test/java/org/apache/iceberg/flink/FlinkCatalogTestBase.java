@@ -21,7 +21,6 @@ package org.apache.iceberg.flink;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -31,7 +30,7 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
-import org.junit.After;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -62,7 +61,7 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
     return new Object[][] {
         new Object[] { "testhive", new String[0] },
         new Object[] { "testhadoop", new String[0] },
-        new Object[] { "testhadoop", new String[] { "l0", "l1" }},
+        new Object[] { "testhadoop_basenamespace", new String[] { "l0", "l1" }},
     };
   }
 
@@ -75,20 +74,20 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
   protected final SupportsNamespaces validationNamespaceCatalog;
   protected final org.apache.flink.table.catalog.Catalog flinkCatalog;
 
-  protected final String flinkIdentifier;
+  protected final String flinkDatabase;
   protected final Namespace icebergNamespace;
   protected final boolean isHadoopCatalog;
 
   public FlinkCatalogTestBase(String catalogName, String[] baseNamespace) {
     this.catalogName = catalogName;
     this.baseNamespace = baseNamespace;
-    this.isHadoopCatalog = catalogName.equals("testhadoop");
+    this.isHadoopCatalog = catalogName.startsWith("testhadoop");
     this.validationCatalog = isHadoopCatalog ?
         new HadoopCatalog(hiveConf, "file:" + warehouse) :
         catalog;
     this.validationNamespaceCatalog = (SupportsNamespaces) validationCatalog;
 
-    Map<String, String> config = new HashMap<>();
+    Map<String, String> config = Maps.newHashMap();
     config.put("type", "iceberg");
     config.put(FlinkCatalogFactory.ICEBERG_CATALOG_TYPE, isHadoopCatalog ? "hadoop" : "hive");
     config.put(FlinkCatalogFactory.HADOOP_WAREHOUSE_LOCATION, "file:" + warehouse);
@@ -104,16 +103,11 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
         return super.buildIcebergCatalog(name, options, hiveConf);
       }
     };
-    flinkCatalog = factory.createCatalog(catalogName, config);
+    flinkCatalog = flinkCatalogs.computeIfAbsent(catalogName, k -> factory.createCatalog(k, config));
     tEnv.registerCatalog(catalogName, flinkCatalog);
 
-    this.flinkIdentifier = catalogName + "." + DATABASE;
+    this.flinkDatabase = catalogName + "." + DATABASE;
     this.icebergNamespace = Namespace.of(ArrayUtils.concat(baseNamespace, new String[] { DATABASE }));
-  }
-
-  @After
-  public void closeCatalog() {
-    flinkCatalog.close();
   }
 
   public void sql(String query, Object... args) {
