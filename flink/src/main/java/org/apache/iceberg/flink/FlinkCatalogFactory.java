@@ -120,8 +120,7 @@ public class FlinkCatalogFactory implements CatalogFactory {
   }
 
   @Override
-  public Catalog createCatalog(
-      String name, Map<String, String> properties) {
+  public Catalog createCatalog(String name, Map<String, String> properties) {
     org.apache.iceberg.catalog.Catalog catalog = buildIcebergCatalog(name, properties);
     String defaultDatabase = properties.getOrDefault(DEFAULT_DATABASE, "default");
     String[] baseNamespace = properties.containsKey(BASE_NAMESPACE) ?
