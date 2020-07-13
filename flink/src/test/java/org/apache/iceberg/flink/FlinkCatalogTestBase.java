@@ -72,7 +72,6 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
   protected final String[] baseNamespace;
   protected final Catalog validationCatalog;
   protected final SupportsNamespaces validationNamespaceCatalog;
-  protected final org.apache.flink.table.catalog.Catalog flinkCatalog;
 
   protected final String flinkDatabase;
   protected final Namespace icebergNamespace;
@@ -103,8 +102,9 @@ public abstract class FlinkCatalogTestBase extends FlinkTestBase {
         return super.buildIcebergCatalog(name, options, hiveConf);
       }
     };
-    flinkCatalog = flinkCatalogs.computeIfAbsent(catalogName, k -> factory.createCatalog(k, config));
-    tEnv.registerCatalog(catalogName, flinkCatalog);
+    tEnv.registerCatalog(
+        catalogName,
+        flinkCatalogs.computeIfAbsent(catalogName, k -> factory.createCatalog(k, config)));
 
     this.flinkDatabase = catalogName + "." + DATABASE;
     this.icebergNamespace = Namespace.of(ArrayUtils.concat(baseNamespace, new String[] { DATABASE }));
