@@ -22,7 +22,6 @@ package org.apache.iceberg.flink;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Objects;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.Schema;
