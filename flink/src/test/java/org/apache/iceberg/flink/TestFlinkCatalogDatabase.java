@@ -20,7 +20,9 @@
 package org.apache.iceberg.flink;
 
 import java.io.File;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.Schema;
@@ -154,7 +156,7 @@ public class TestFlinkCatalogDatabase extends FlinkCatalogTestBase {
         Assert.assertEquals("Should have only db database", "db", databases[0]);
       }
     } else {
-      Assert.assertEquals("Should have 2 databases", 2, databases.length);
+      Assert.assertEquals("Should have 2 databases, but have: " + Arrays.toString(databases), 2, databases.length);
       Assert.assertEquals(
           "Should have default and db databases",
           ImmutableSet.of("default", "db"),
