@@ -20,7 +20,6 @@
 package org.apache.iceberg.data.avro;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.avro.LogicalType;
@@ -28,22 +27,16 @@ import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
-import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.ResolvingDecoder;
 import org.apache.iceberg.avro.AvroSchemaUtil;
 import org.apache.iceberg.avro.AvroSchemaWithTypeVisitor;
 import org.apache.iceberg.avro.ValueReader;
 import org.apache.iceberg.avro.ValueReaders;
-import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
-import org.apache.iceberg.relocated.com.google.common.collect.MapMaker;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 
 public class DataReader<T> implements DatumReader<T> {
-
-  private static final ThreadLocal<Map<Schema, Map<Schema, ResolvingDecoder>>> DECODER_CACHES =
-      ThreadLocal.withInitial(() -> new MapMaker().weakKeys().makeMap());
 
   public static <D> DataReader<D> create(org.apache.iceberg.Schema expectedSchema, Schema readSchema) {
     return create(expectedSchema, readSchema, ImmutableMap.of());
@@ -72,34 +65,10 @@ public class DataReader<T> implements DatumReader<T> {
 
   @Override
   public T read(T reuse, Decoder decoder) throws IOException {
-    ResolvingDecoder resolver = resolve(decoder);
+    ResolvingDecoder resolver = DecoderResolver.resolve(decoder, readSchema, fileSchema);
     T value = reader.read(resolver, reuse);
     resolver.drain();
     return value;
-  }
-
-  private ResolvingDecoder resolve(Decoder decoder) throws IOException {
-    Map<Schema, Map<Schema, ResolvingDecoder>> cache = DECODER_CACHES.get();
-    Map<Schema, ResolvingDecoder> fileSchemaToResolver = cache
-        .computeIfAbsent(readSchema, k -> new HashMap<>());
-
-    ResolvingDecoder resolver = fileSchemaToResolver.get(fileSchema);
-    if (resolver == null) {
-      resolver = newResolver();
-      fileSchemaToResolver.put(fileSchema, resolver);
-    }
-
-    resolver.configure(decoder);
-
-    return resolver;
-  }
-
-  private ResolvingDecoder newResolver() {
-    try {
-      return DecoderFactory.get().resolvingDecoder(fileSchema, readSchema, null);
-    } catch (IOException e) {
-      throw new RuntimeIOException(e);
-    }
   }
 
   protected ValueReader<?> createStructReader(Types.StructType struct,
@@ -115,9 +84,9 @@ public class DataReader<T> implements DatumReader<T> {
     }
 
     @Override
-    public ValueReader<?> record(Types.StructType struct, Schema record,
+    public ValueReader<?> record(Type struct, Schema record,
                                  List<String> names, List<ValueReader<?>> fields) {
-      return createStructReader(struct, fields, idToConstant);
+      return createStructReader(struct.asStructType(), fields, idToConstant);
     }
 
     @Override
@@ -126,22 +95,22 @@ public class DataReader<T> implements DatumReader<T> {
     }
 
     @Override
-    public ValueReader<?> array(Types.ListType ignored, Schema array, ValueReader<?> elementReader) {
+    public ValueReader<?> array(Type ignored, Schema array, ValueReader<?> elementReader) {
       return ValueReaders.array(elementReader);
     }
 
     @Override
-    public ValueReader<?> map(Types.MapType iMap, Schema map, ValueReader<?> keyReader, ValueReader<?> valueReader) {
+    public ValueReader<?> map(Type iMap, Schema map, ValueReader<?> keyReader, ValueReader<?> valueReader) {
       return ValueReaders.arrayMap(keyReader, valueReader);
     }
 
     @Override
-    public ValueReader<?> map(Types.MapType ignored, Schema map, ValueReader<?> valueReader) {
+    public ValueReader<?> map(Type ignored, Schema map, ValueReader<?> valueReader) {
       return ValueReaders.map(ValueReaders.strings(), valueReader);
     }
 
     @Override
-    public ValueReader<?> primitive(Type.PrimitiveType ignored, Schema primitive) {
+    public ValueReader<?> primitive(Type ignored, Schema primitive) {
       LogicalType logicalType = primitive.getLogicalType();
       if (logicalType != null) {
         switch (logicalType.getName()) {
@@ -158,21 +127,8 @@ public class DataReader<T> implements DatumReader<T> {
             return GenericReaders.timestamps();
 
           case "decimal":
-            ValueReader<byte[]> inner;
-            switch (primitive.getType()) {
-              case FIXED:
-                inner = ValueReaders.fixed(primitive.getFixedSize());
-                break;
-              case BYTES:
-                inner = ValueReaders.bytes();
-                break;
-              default:
-                throw new IllegalArgumentException(
-                    "Invalid primitive type for decimal: " + primitive.getType());
-            }
-
             LogicalTypes.Decimal decimal = (LogicalTypes.Decimal) logicalType;
-            return ValueReaders.decimal(inner, decimal.getScale());
+            return ValueReaders.decimal(decimalBinaryValueReader(primitive), decimal.getScale());
 
           case "uuid":
             return ValueReaders.uuids();
@@ -206,5 +162,21 @@ public class DataReader<T> implements DatumReader<T> {
           throw new IllegalArgumentException("Unsupported type: " + primitive);
       }
     }
+  }
+
+  public static ValueReader<byte[]> decimalBinaryValueReader(Schema primitive) {
+    ValueReader<byte[]> inner;
+    switch (primitive.getType()) {
+      case FIXED:
+        inner = ValueReaders.fixed(primitive.getFixedSize());
+        break;
+      case BYTES:
+        inner = ValueReaders.bytes();
+        break;
+      default:
+        throw new IllegalArgumentException(
+            "Invalid primitive type for decimal: " + primitive.getType());
+    }
+    return inner;
   }
 }

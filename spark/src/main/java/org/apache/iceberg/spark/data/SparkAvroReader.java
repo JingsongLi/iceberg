@@ -20,7 +20,6 @@
 package org.apache.iceberg.spark.data;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.avro.LogicalType;
@@ -28,23 +27,18 @@ import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
-import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.ResolvingDecoder;
 import org.apache.iceberg.avro.AvroSchemaWithTypeVisitor;
 import org.apache.iceberg.avro.ValueReader;
 import org.apache.iceberg.avro.ValueReaders;
-import org.apache.iceberg.exceptions.RuntimeIOException;
+import org.apache.iceberg.data.avro.DataReader;
+import org.apache.iceberg.data.avro.DecoderResolver;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
-import org.apache.iceberg.relocated.com.google.common.collect.MapMaker;
 import org.apache.iceberg.types.Type;
-import org.apache.iceberg.types.Types;
 import org.apache.spark.sql.catalyst.InternalRow;
 
 
 public class SparkAvroReader implements DatumReader<InternalRow> {
-
-  private static final ThreadLocal<Map<Schema, Map<Schema, ResolvingDecoder>>> DECODER_CACHES =
-      ThreadLocal.withInitial(() -> new MapMaker().weakKeys().makeMap());
 
   private final Schema readSchema;
   private final ValueReader<InternalRow> reader;
@@ -68,34 +62,10 @@ public class SparkAvroReader implements DatumReader<InternalRow> {
 
   @Override
   public InternalRow read(InternalRow reuse, Decoder decoder) throws IOException {
-    ResolvingDecoder resolver = resolve(decoder);
+    ResolvingDecoder resolver = DecoderResolver.resolve(decoder, readSchema, fileSchema);
     InternalRow row = reader.read(resolver, reuse);
     resolver.drain();
     return row;
-  }
-
-  private ResolvingDecoder resolve(Decoder decoder) throws IOException {
-    Map<Schema, Map<Schema, ResolvingDecoder>> cache = DECODER_CACHES.get();
-    Map<Schema, ResolvingDecoder> fileSchemaToResolver = cache
-        .computeIfAbsent(readSchema, k -> new HashMap<>());
-
-    ResolvingDecoder resolver = fileSchemaToResolver.get(fileSchema);
-    if (resolver == null) {
-      resolver = newResolver();
-      fileSchemaToResolver.put(fileSchema, resolver);
-    }
-
-    resolver.configure(decoder);
-
-    return resolver;
-  }
-
-  private ResolvingDecoder newResolver() {
-    try {
-      return DecoderFactory.get().resolvingDecoder(fileSchema, readSchema, null);
-    } catch (IOException e) {
-      throw new RuntimeIOException(e);
-    }
   }
 
   private static class ReadBuilder extends AvroSchemaWithTypeVisitor<ValueReader<?>> {
@@ -106,9 +76,9 @@ public class SparkAvroReader implements DatumReader<InternalRow> {
     }
 
     @Override
-    public ValueReader<?> record(Types.StructType expected, Schema record, List<String> names,
+    public ValueReader<?> record(Type expected, Schema record, List<String> names,
                                  List<ValueReader<?>> fields) {
-      return SparkValueReaders.struct(fields, expected, idToConstant);
+      return SparkValueReaders.struct(fields, expected.asStructType(), idToConstant);
     }
 
     @Override
@@ -117,23 +87,23 @@ public class SparkAvroReader implements DatumReader<InternalRow> {
     }
 
     @Override
-    public ValueReader<?> array(Types.ListType expected, Schema array, ValueReader<?> elementReader) {
+    public ValueReader<?> array(Type expected, Schema array, ValueReader<?> elementReader) {
       return SparkValueReaders.array(elementReader);
     }
 
     @Override
-    public ValueReader<?> map(Types.MapType expected, Schema map,
+    public ValueReader<?> map(Type expected, Schema map,
                               ValueReader<?> keyReader, ValueReader<?> valueReader) {
       return SparkValueReaders.arrayMap(keyReader, valueReader);
     }
 
     @Override
-    public ValueReader<?> map(Types.MapType expected, Schema map, ValueReader<?> valueReader) {
+    public ValueReader<?> map(Type expected, Schema map, ValueReader<?> valueReader) {
       return SparkValueReaders.map(SparkValueReaders.strings(), valueReader);
     }
 
     @Override
-    public ValueReader<?> primitive(Type.PrimitiveType expected, Schema primitive) {
+    public ValueReader<?> primitive(Type expected, Schema primitive) {
       LogicalType logicalType = primitive.getLogicalType();
       if (logicalType != null) {
         switch (logicalType.getName()) {
@@ -151,21 +121,8 @@ public class SparkAvroReader implements DatumReader<InternalRow> {
             return ValueReaders.longs();
 
           case "decimal":
-            ValueReader<byte[]> inner;
-            switch (primitive.getType()) {
-              case FIXED:
-                inner = ValueReaders.fixed(primitive.getFixedSize());
-                break;
-              case BYTES:
-                inner = ValueReaders.bytes();
-                break;
-              default:
-                throw new IllegalArgumentException(
-                    "Invalid primitive type for decimal: " + primitive.getType());
-            }
-
             LogicalTypes.Decimal decimal = (LogicalTypes.Decimal) logicalType;
-            return SparkValueReaders.decimal(inner, decimal.getScale());
+            return SparkValueReaders.decimal(DataReader.decimalBinaryValueReader(primitive), decimal.getScale());
 
           case "uuid":
             return SparkValueReaders.uuids();
