@@ -34,6 +34,7 @@ import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogFunction;
 import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
@@ -46,8 +47,11 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.utils.TableSchemaUtils;
 import org.apache.flink.util.StringUtils;
 import org.apache.iceberg.CachingCatalog;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
@@ -56,6 +60,7 @@ import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.NamespaceNotEmptyException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 
@@ -274,14 +279,22 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public CatalogBaseTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {
-    try {
-      Table table = icebergCatalog.loadTable(toIdentifier(tablePath));
-      TableSchema tableSchema = FlinkSchemaUtil.toSchema(FlinkSchemaUtil.convert(table.schema()));
+    Table table = getIcebergTable(tablePath);
 
-      // NOTE: We can not create a IcebergCatalogTable, because Flink optimizer may use CatalogTableImpl to copy a new
-      // catalog table.
-      // Let's re-loading table from Iceberg catalog when creating source/sink operators.
-      return new CatalogTableImpl(tableSchema, table.properties(), null);
+    TableSchema physicalSchema = FlinkSchemaUtil.toSchema(FlinkSchemaUtil.convert(table.schema()));
+    TableSchema tableSchema = CatalogSchemaUtil.restoreSchemaFromMap(table.properties(), physicalSchema);
+
+    List<String> partitionKeys = CatalogSchemaUtil.toPartitionKeys(table.spec(), table.schema(), tableSchema);
+
+    // NOTE: We can not create a IcebergCatalogTable, because Flink optimizer may use CatalogTableImpl to copy a new
+    // catalog table.
+    // Let's re-loading table from Iceberg catalog when creating source/sink operators.
+    return new CatalogTableImpl(tableSchema, partitionKeys, table.properties(), null);
+  }
+
+  Table getIcebergTable(ObjectPath tablePath) throws TableNotExistException {
+    try {
+      return icebergCatalog.loadTable(toIdentifier(tablePath));
     } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
       throw new TableNotExistException(getName(), tablePath, e);
     }
@@ -316,13 +329,32 @@ public class FlinkCatalog extends AbstractCatalog {
     }
   }
 
-  /**
-   * TODO Add partitioning to the Flink DDL parser.
-   */
   @Override
   public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
-      throws CatalogException {
-    throw new UnsupportedOperationException("Not support createTable now.");
+      throws CatalogException, TableAlreadyExistException {
+    Preconditions.checkArgument(table instanceof CatalogTable, "The Table should be a CatalogTable.");
+    // Exclude computed columns
+    TableSchema physicalSchema = TableSchemaUtils.getPhysicalSchema(table.getSchema());
+    Schema icebergSchema = FlinkSchemaUtil.convert(physicalSchema);
+
+    // Store Computed columns in properties
+    Map<String, String> options = Maps.newHashMap(table.getOptions());
+    options.putAll(CatalogSchemaUtil.serializeComputedColumns(table.getSchema()));
+
+    // Restore partition transform from computed columns
+    PartitionSpec spec = CatalogSchemaUtil.toPartitionSpec(
+        ((CatalogTable) table).getPartitionKeys(), icebergSchema, table.getSchema());
+
+    try {
+      icebergCatalog.createTable(
+          toIdentifier(tablePath),
+          icebergSchema,
+          spec,
+          options.get("location"),
+          options);
+    } catch (AlreadyExistsException e) {
+      throw new TableAlreadyExistException(getName(), tablePath, e);
+    }
   }
 
   @Override

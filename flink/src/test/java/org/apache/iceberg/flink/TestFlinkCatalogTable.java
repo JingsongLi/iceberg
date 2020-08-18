@@ -23,11 +23,19 @@ import java.util.Arrays;
 import java.util.Collections;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableColumn;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.CatalogBaseTable;
+import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.iceberg.AssertHelpers;
+import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.junit.After;
 import org.junit.Assert;
@@ -87,5 +95,49 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
     Assert.assertEquals(
         Collections.singletonList(TableColumn.of("id", DataTypes.BIGINT())),
         tEnv.from("tl2").getSchema().getTableColumns());
+  }
+
+  @Test
+  public void testCreateTable() throws TableNotExistException {
+    Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
+
+    tEnv.executeSql("CREATE TABLE tl(id BIGINT)");
+    Table table = table("tl");
+    Assert.assertEquals(
+        new Schema(Types.NestedField.optional(1, "id", Types.LongType.get())).asStruct(),
+        table.schema().asStruct());
+    Assert.assertEquals(Maps.newHashMap(), table.properties());
+    CatalogTable catalogTable = catalogTable("tl");
+    Assert.assertEquals(TableSchema.builder().field("id", DataTypes.BIGINT()).build(), catalogTable.getSchema());
+    Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
+  }
+
+  @Test
+  public void testCreatePartitionTable() throws TableNotExistException {
+    Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
+
+    tEnv.executeSql("CREATE TABLE tl(id BIGINT, dt STRING) PARTITIONED BY(dt)");
+    Table table = table("tl");
+    Assert.assertEquals(
+        new Schema(
+            Types.NestedField.optional(1, "id", Types.LongType.get()),
+            Types.NestedField.optional(2, "dt", Types.StringType.get())).asStruct(),
+        table.schema().asStruct());
+    Assert.assertEquals(PartitionSpec.builderFor(table.schema()).identity("dt").build(), table.spec());
+    Assert.assertEquals(Maps.newHashMap(), table.properties());
+    CatalogTable catalogTable = catalogTable("tl");
+    Assert.assertEquals(
+        TableSchema.builder().field("id", DataTypes.BIGINT()).field("dt", DataTypes.STRING()).build(),
+        catalogTable.getSchema());
+    Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
+    Assert.assertEquals(Collections.singletonList("dt"), catalogTable.getPartitionKeys());
+  }
+
+  private Table table(String name) {
+    return validationCatalog.loadTable(TableIdentifier.of(icebergNamespace, name));
+  }
+
+  private CatalogTable catalogTable(String name) throws TableNotExistException {
+    return (CatalogTable) tEnv.getCatalog(tEnv.getCurrentCatalog()).get().getTable(new ObjectPath(DATABASE, name));
   }
 }
