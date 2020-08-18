@@ -133,6 +133,8 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
     Assert.assertEquals(Collections.singletonList("dt"), catalogTable.getPartitionKeys());
   }
 
+  // TODO add computed column and watermark cases
+
   private Table table(String name) {
     return validationCatalog.loadTable(TableIdentifier.of(icebergNamespace, name));
   }

@@ -21,15 +21,14 @@ package org.apache.iceberg.flink;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.WatermarkSpec;
-import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
@@ -145,7 +144,7 @@ class CatalogSchemaUtil {
       if (!schema.getTableColumn(partitionKey).get().getExpr().isPresent()) {
         builder.identity(partitionKey);
       } else {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException("Creating partition from computed column is not supported yet.");
       }
     }
     return builder.build();
@@ -153,14 +152,14 @@ class CatalogSchemaUtil {
 
   static List<String> toPartitionKeys(PartitionSpec spec, Schema icebergSchema, TableSchema schema) {
     List<String> partitionKeys = Lists.newArrayList();
-    // TODO return empty if cannot map to Flink partitions.
-    spec.fields().forEach(f -> {
-      if (f.transform().isIdentity()) {
-        partitionKeys.add(icebergSchema.findColumnName(f.sourceId()));
+    for (PartitionField field : spec.fields()) {
+      if (field.transform().isIdentity()) {
+        partitionKeys.add(icebergSchema.findColumnName(field.sourceId()));
       } else {
-        throw new IllegalStateException("TODO");
+        // For compatibility with iceberg tables, return empty.
+        return Collections.emptyList();
       }
-    });
+    }
     return partitionKeys;
   }
 }
