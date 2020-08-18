@@ -153,6 +153,7 @@ class CatalogSchemaUtil {
 
   static List<String> toPartitionKeys(PartitionSpec spec, Schema icebergSchema, TableSchema schema) {
     List<String> partitionKeys = Lists.newArrayList();
+    // TODO return empty if cannot map to Flink partitions.
     spec.fields().forEach(f -> {
       if (f.transform().isIdentity()) {
         partitionKeys.add(icebergSchema.findColumnName(f.sourceId()));
