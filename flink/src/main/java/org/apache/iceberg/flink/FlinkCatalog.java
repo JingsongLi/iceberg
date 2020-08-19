@@ -53,6 +53,8 @@ import org.apache.iceberg.CachingCatalog;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.Transaction;
+import org.apache.iceberg.UpdateProperties;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
@@ -278,9 +280,20 @@ public class FlinkCatalog extends AbstractCatalog {
   }
 
   @Override
-  public CatalogBaseTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {
+  public CatalogTable getTable(ObjectPath tablePath) throws TableNotExistException, CatalogException {
     Table table = getIcebergTable(tablePath);
+    return toCatalogTable(table);
+  }
 
+  Table getIcebergTable(ObjectPath tablePath) throws TableNotExistException {
+    try {
+      return icebergCatalog.loadTable(toIdentifier(tablePath));
+    } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
+      throw new TableNotExistException(getName(), tablePath, e);
+    }
+  }
+
+  private CatalogTable toCatalogTable(Table table) {
     TableSchema physicalSchema = FlinkSchemaUtil.toSchema(FlinkSchemaUtil.convert(table.schema()));
     TableSchema tableSchema = CatalogSchemaUtil.restoreSchemaFromMap(table.properties(), physicalSchema);
 
@@ -290,14 +303,6 @@ public class FlinkCatalog extends AbstractCatalog {
     // catalog table.
     // Let's re-loading table from Iceberg catalog when creating source/sink operators.
     return new CatalogTableImpl(tableSchema, partitionKeys, table.properties(), null);
-  }
-
-  Table getIcebergTable(ObjectPath tablePath) throws TableNotExistException {
-    try {
-      return icebergCatalog.loadTable(toIdentifier(tablePath));
-    } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
-      throw new TableNotExistException(getName(), tablePath, e);
-    }
   }
 
   @Override
@@ -359,8 +364,95 @@ public class FlinkCatalog extends AbstractCatalog {
 
   @Override
   public void alterTable(ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists)
-      throws CatalogException {
-    throw new UnsupportedOperationException("Not support alterTable now.");
+      throws CatalogException, TableNotExistException {
+    Preconditions.checkArgument(newTable instanceof CatalogTable, "The newTable should be a CatalogTable.");
+    Table icebergTable = getIcebergTable(tablePath);
+    CatalogTable table = toCatalogTable(icebergTable);
+
+    // Currently, Flink SQL only support altering table properties and primary keys.
+
+    if (!table.getSchema().equals(newTable.getSchema())) {
+      throw new UnsupportedOperationException("Altering schema is not supported yet.");
+    }
+
+    if (!table.getPartitionKeys().equals(((CatalogTable) newTable).getPartitionKeys())) {
+      throw new UnsupportedOperationException("Altering partition keys is not supported yet.");
+    }
+
+    Map<String, String> oldOptions = table.getOptions();
+    Map<String, String> setProperties = Maps.newHashMap();
+
+    String setLocation = null;
+    String setSnapshotId = null;
+    String pickSnapshotId = null;
+
+    for (Map.Entry<String, String> entry : newTable.getOptions().entrySet()) {
+      String k = entry.getKey();
+      String v = entry.getValue();
+
+      if (v.equals(oldOptions.get(k))) {
+        continue;
+      }
+
+      if ("location".equalsIgnoreCase(k)) {
+        setLocation = v;
+      } else if ("current-snapshot-id".equalsIgnoreCase(k)) {
+        setSnapshotId = v;
+      } else if ("cherry-pick-snapshot-id".equalsIgnoreCase(k)) {
+        pickSnapshotId = v;
+      } else {
+        setProperties.put(k, v);
+      }
+    }
+
+    oldOptions.keySet().forEach(k -> {
+      if (!newTable.getOptions().containsKey(k)) {
+        setProperties.put(k, null);
+      }
+    });
+
+    commitChanges(icebergTable, setLocation, setSnapshotId, pickSnapshotId, setProperties);
+  }
+
+  private static void commitChanges(Table table, String setLocation, String setSnapshotId,
+      String pickSnapshotId, Map<String, String> setProperties) {
+    // don't allow setting the snapshot and picking a commit at the same time because order is ambiguous and choosing
+    // one order leads to different results
+    Preconditions.checkArgument(setSnapshotId == null || pickSnapshotId == null,
+        "Cannot set the current the current snapshot ID and cherry-pick snapshot changes");
+
+    if (setSnapshotId != null) {
+      long newSnapshotId = Long.parseLong(setSnapshotId);
+      table.manageSnapshots().setCurrentSnapshot(newSnapshotId).commit();
+    }
+
+    // if updating the table snapshot, perform that update first in case it fails
+    if (pickSnapshotId != null) {
+      long newSnapshotId = Long.parseLong(pickSnapshotId);
+      table.manageSnapshots().cherrypick(newSnapshotId).commit();
+    }
+
+    Transaction transaction = table.newTransaction();
+
+    if (setLocation != null) {
+      transaction.updateLocation()
+          .setLocation(setLocation)
+          .commit();
+    }
+
+    if (!setProperties.isEmpty()) {
+      UpdateProperties updateProperties = transaction.updateProperties();
+      setProperties.forEach((k, v) -> {
+        if (v == null) {
+          updateProperties.remove(k);
+        } else {
+          updateProperties.set(k, v);
+        }
+      });
+      updateProperties.commit();
+    }
+
+    transaction.commitTransaction();
   }
 
   // ------------------------------ Unsupported methods ---------------------------------------------

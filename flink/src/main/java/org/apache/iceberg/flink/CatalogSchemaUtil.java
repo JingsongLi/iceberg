@@ -43,14 +43,14 @@ import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_
 import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_STRATEGY_DATA_TYPE;
 import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_STRATEGY_EXPR;
 
+/**
+ * The serialization protocol is compatible with DescriptorProperties.putTableSchema.
+ */
 class CatalogSchemaUtil {
   private CatalogSchemaUtil() {}
 
   private static final Pattern SCHEMA_COLUMN_NAME_SUFFIX = Pattern.compile("\\d+\\.name");
 
-  /**
-   * The serialization protocol is compatible with DescriptorProperties.putTableSchema.
-   */
   static Map<String, String> serializeComputedColumns(TableSchema schema) {
     DescriptorProperties properties = new DescriptorProperties();
     String key = "schema";
@@ -156,6 +156,7 @@ class CatalogSchemaUtil {
       if (field.transform().isIdentity()) {
         partitionKeys.add(icebergSchema.findColumnName(field.sourceId()));
       } else {
+        // Not created by Flink SQL.
         // For compatibility with iceberg tables, return empty.
         return Collections.emptyList();
       }

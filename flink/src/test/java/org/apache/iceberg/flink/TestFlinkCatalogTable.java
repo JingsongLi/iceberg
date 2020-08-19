@@ -21,11 +21,11 @@ package org.apache.iceberg.flink;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
@@ -35,7 +35,6 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
-import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.junit.After;
 import org.junit.Assert;
@@ -102,11 +101,13 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
     Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
 
     tEnv.executeSql("CREATE TABLE tl(id BIGINT)");
+
     Table table = table("tl");
     Assert.assertEquals(
         new Schema(Types.NestedField.optional(1, "id", Types.LongType.get())).asStruct(),
         table.schema().asStruct());
     Assert.assertEquals(Maps.newHashMap(), table.properties());
+
     CatalogTable catalogTable = catalogTable("tl");
     Assert.assertEquals(TableSchema.builder().field("id", DataTypes.BIGINT()).build(), catalogTable.getSchema());
     Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
@@ -117,6 +118,7 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
     Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
 
     tEnv.executeSql("CREATE TABLE tl(id BIGINT, dt STRING) PARTITIONED BY(dt)");
+
     Table table = table("tl");
     Assert.assertEquals(
         new Schema(
@@ -125,12 +127,55 @@ public class TestFlinkCatalogTable extends FlinkCatalogTestBase {
         table.schema().asStruct());
     Assert.assertEquals(PartitionSpec.builderFor(table.schema()).identity("dt").build(), table.spec());
     Assert.assertEquals(Maps.newHashMap(), table.properties());
+
     CatalogTable catalogTable = catalogTable("tl");
     Assert.assertEquals(
         TableSchema.builder().field("id", DataTypes.BIGINT()).field("dt", DataTypes.STRING()).build(),
         catalogTable.getSchema());
     Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
     Assert.assertEquals(Collections.singletonList("dt"), catalogTable.getPartitionKeys());
+  }
+
+  @Test
+  public void testLoadTransformPartitionTable() throws TableNotExistException {
+    Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
+
+    Schema schema = new Schema(Types.NestedField.optional(0, "id", Types.LongType.get()));
+    validationCatalog.createTable(
+        TableIdentifier.of(icebergNamespace, "tl"), schema,
+        PartitionSpec.builderFor(schema).bucket("id", 100).build());
+
+    CatalogTable catalogTable = catalogTable("tl");
+    Assert.assertEquals(
+        TableSchema.builder().field("id", DataTypes.BIGINT()).build(),
+        catalogTable.getSchema());
+    Assert.assertEquals(Maps.newHashMap(), catalogTable.getOptions());
+    Assert.assertEquals(Collections.emptyList(), catalogTable.getPartitionKeys());
+  }
+
+  @Test
+  public void testAlterTable() {
+    Assume.assumeFalse("HadoopCatalog does not support rename table", isHadoopCatalog);
+    tEnv.executeSql("CREATE TABLE tl(id BIGINT) WITH ('oldK'='oldV')");
+    Map<String, String> properties = Maps.newHashMap();
+    properties.put("oldK", "oldV");
+
+    // new
+    tEnv.executeSql("ALTER TABLE tl SET('newK'='newV')");
+    properties.put("newK", "newV");
+    Assert.assertEquals(properties, table("tl").properties());
+
+    // update old
+    tEnv.executeSql("ALTER TABLE tl SET('oldK'='oldV2')");
+    properties.put("oldK", "oldV2");
+    Assert.assertEquals(properties, table("tl").properties());
+
+    // TODO current-snapshot-id cherry-pick-snapshot-id
+
+    // location
+    tEnv.executeSql("ALTER TABLE tl SET('location'='/tmp/location')");
+    properties.put("oldK", "oldV2");
+    Assert.assertEquals("/tmp/location", table("tl").location());
   }
 
   // TODO add computed column and watermark cases
