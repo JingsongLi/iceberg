@@ -27,6 +27,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.runtime.typeutils.RowDataTypeInfo;
 import org.apache.flink.table.sources.FilterableTableSource;
 import org.apache.flink.table.sources.LimitableTableSource;
@@ -41,13 +42,16 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.flink.CatalogLoader;
+import org.apache.iceberg.flink.FlinkFilters;
 import org.apache.iceberg.flink.TableLoader;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 /**
  * Flink Iceberg table source.
- * TODO: Implement {@link FilterableTableSource} and {@link LimitableTableSource}.
+ * TODO: Implement {@link LimitableTableSource}.
  */
-public class FlinkTableSource implements StreamTableSource<RowData>, ProjectableTableSource<RowData> {
+public class FlinkTableSource
+    implements StreamTableSource<RowData>, ProjectableTableSource<RowData>, FilterableTableSource<RowData> {
 
   private final TableIdentifier identifier;
   private final Table table;
@@ -56,16 +60,17 @@ public class FlinkTableSource implements StreamTableSource<RowData>, Projectable
   private final TableSchema schema;
   private final Map<String, String> options;
   private final int[] projectedFields;
+  private final List<Expression> filters;
 
   public FlinkTableSource(
       TableIdentifier identifier, Table table, CatalogLoader catalogLoader, Configuration hadoopConf,
       TableSchema schema, Map<String, String> options) {
-    this(identifier, table, catalogLoader, hadoopConf, schema, options, null);
+    this(identifier, table, catalogLoader, hadoopConf, schema, options, null, null);
   }
 
   private FlinkTableSource(
       TableIdentifier identifier, Table table, CatalogLoader catalogLoader, Configuration hadoopConf,
-      TableSchema schema, Map<String, String> options, int[] projectedFields) {
+      TableSchema schema, Map<String, String> options, int[] projectedFields, List<Expression> filters) {
     this.identifier = identifier;
     this.table = table;
     this.catalogLoader = catalogLoader;
@@ -73,6 +78,7 @@ public class FlinkTableSource implements StreamTableSource<RowData>, Projectable
     this.schema = schema;
     this.options = options;
     this.projectedFields = projectedFields;
+    this.filters = filters;
   }
 
   @Override
@@ -82,7 +88,18 @@ public class FlinkTableSource implements StreamTableSource<RowData>, Projectable
 
   @Override
   public TableSource<RowData> projectFields(int[] fields) {
-    return new FlinkTableSource(identifier, table, catalogLoader, hadoopConf, schema, options, fields);
+    return new FlinkTableSource(identifier, table, catalogLoader, hadoopConf, schema, options, fields, filters);
+  }
+
+  @Override
+  public TableSource<RowData> applyPredicate(List<Expression> predicates) {
+    return new FlinkTableSource(identifier, table, catalogLoader, hadoopConf, schema, options, projectedFields,
+                                Lists.newArrayList(predicates));
+  }
+
+  @Override
+  public boolean isFilterPushedDown() {
+    return filters != null;
   }
 
   @Override
@@ -94,9 +111,15 @@ public class FlinkTableSource implements StreamTableSource<RowData>, Projectable
                            .mapToObj(project -> icebergSchema.asStruct().fields().get(project).name())
                            .collect(Collectors.toList());
     }
+
+    List<org.apache.iceberg.expressions.Expression> icebergFilters = null;
+    if (filters != null) {
+      icebergFilters = filters.stream().map(FlinkFilters::convert).collect(Collectors.toList());
+    }
+
     FlinkInputFormat inputFormat = FlinkInputFormat.builder().table(table)
         .tableLoader(TableLoader.fromCatalog(catalogLoader, identifier)).hadoopConf(hadoopConf)
-        .select(projectNames).options(ScanOptions.of(options)).build();
+        .select(projectNames).options(ScanOptions.of(options)).filters(icebergFilters).build();
     return execEnv.createInput(inputFormat, RowDataTypeInfo.of((RowType) getProducedDataType().getLogicalType()));
   }
 
@@ -129,6 +152,13 @@ public class FlinkTableSource implements StreamTableSource<RowData>, Projectable
     if (projectedFields != null) {
       explain += ", ProjectedFields: " + Arrays.toString(projectedFields);
     }
+    if (filters != null) {
+      explain += ", filters=" + filtersString();
+    }
     return TableConnectorUtils.generateRuntimeName(getClass(), getTableSchema().getFieldNames()) + explain;
+  }
+
+  private String filtersString() {
+    return filters.stream().map(Expression::asSummaryString).collect(Collectors.joining(","));
   }
 }
