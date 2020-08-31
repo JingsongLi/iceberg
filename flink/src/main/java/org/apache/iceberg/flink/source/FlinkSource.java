@@ -57,12 +57,12 @@ public class FlinkSource {
   }
 
   /**
-   * Initialize a {@link Builder} to read the data from iceberg table in streaming mode. Reading new data continuously.
+   * Initialize a {@link Builder} to read the data from iceberg table in unbounded mode. Reading new data continuously.
    *
    * @return {@link Builder} to connect the iceberg table.
    */
-  public static Builder forStreaming() {
-    return new StreamingBuilder();
+  public static Builder forUnbounded() {
+    return new UnboundedBuilder();
   }
 
   /**
@@ -195,7 +195,7 @@ public class FlinkSource {
       return env.createInput(format, outputTypeInfo);
     }
 
-    DataStream<RowData> buildStreamingSource() {
+    DataStream<RowData> buildUnboundedSource() {
       FlinkInputFormat format = buildInputFormat();
       OneInputStreamOperatorFactory<FlinkInputSplit, RowData> factory = StreamingReaderOperator.factory(format);
       StreamingMonitorFunction function = new StreamingMonitorFunction(tableLoader, expectedSchema,
@@ -212,10 +212,10 @@ public class FlinkSource {
     }
   }
 
-  private static final class StreamingBuilder extends Builder {
+  private static final class UnboundedBuilder extends Builder {
     @Override
     public DataStream<RowData> build() {
-      return buildStreamingSource();
+      return buildUnboundedSource();
     }
   }
 }
