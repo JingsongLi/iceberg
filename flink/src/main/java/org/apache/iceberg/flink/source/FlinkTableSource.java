@@ -93,7 +93,7 @@ public class FlinkTableSource implements StreamTableSource<RowData>, Projectable
 
     FlinkSource.Builder builder = scanOptions.isStreaming() ? FlinkSource.forUnbounded() : FlinkSource.forBounded();
     return builder.env(execEnv).table(table).tableLoader(tableLoader).hadoopConf(hadoopConf)
-                  .select(projectNames).options(scanOptions).build();
+        .select(projectNames).options(scanOptions).build();
   }
 
   @Override
